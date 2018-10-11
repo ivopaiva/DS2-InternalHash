@@ -86,7 +86,7 @@ void insertClient(Client *cli, FILE *fileName){
                 fseek(fileName, j * clientSize() , SEEK_SET);
                 readClient(tempCli, fileName);
 
-                if(tempCli->status == 1){
+                if(tempCli->status == 1){//if position is occupied
                     j = (j+1) % HASH_SIZE;
                     i++;
                 }else{
@@ -116,7 +116,14 @@ void insertClient(Client *cli, FILE *fileName){
 
         }
 
-        writeClient(cli, fileName, j, clientSize());
+        //T[j].key = clientCode
+        //T[j].status = occupied
+        cli->status = 1;
+        fseek(fileName, j*clientSize(),SEEK_SET);
+        fwrite(&cli->clientCode, sizeof(int), 1, fileName);
+        fwrite(cli->name, sizeof(char), sizeof(cli->name), fileName);
+        fwrite(&cli->status, sizeof(int), 1, fileName);
+
     }else{
         printf("Not allowed: key already exists!\n");
     }
