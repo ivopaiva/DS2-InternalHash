@@ -42,107 +42,156 @@ void writeClient(Client *cli, FILE *fileName, int filePos, int size){
 }
 
 
-void findClient(int clientKey, FILE *fileName, int *filePos, int *controlVar){// clientkey= x, controlvar = a filepos = end
+int findFreePosition(FILE *fileName, int mappedPos){
     Client * client = (Client*) malloc(sizeof(Client));
-    *controlVar = 0;
-    int j = -1; // J is the first free position of the client chain
+    int i=0,j = mappedPos;
 
-    while (*controlVar == 0) {
-        fseek(fileName, *filePos * clientSize() , SEEK_SET);
+    while(i < HASH_SIZE){
+        fseek(fileName, j*clientSize(), SEEK_SET);
         readClient(client, fileName);
 
-        if(client->status == 0 ){//if position is free
-            j = *filePos;
+        if(client->status == 0){
+            return j;
         }
-        if(client->clientCode == clientKey && client->status == 1){// if is the key I'm looking for and if the position is occupied
-            *controlVar = 1;//found key
-        }
-        else {
-            if(client->pointer == -1){ // key not found
-                *controlVar = 2;
-                *filePos = j;
-            }else{
-                *filePos = client->pointer;
-            }
-        }
-
+        j = (j+1) % HASH_SIZE;
+        i++;
     }
+    printf("Overflow!!!");
+    exit(0);
+}
+
+
+int findClient(FILE *fileName, int key){
+    int i=0,j;
+    Client *tempCli = (Client *) malloc(sizeof(Client));
+
+    j = hashFunction(key, HASH_SIZE);
+
+    while(i < HASH_SIZE){
+        fseek(fileName, j*clientSize(), SEEK_SET);
+        readClient(tempCli, fileName);
+
+        if(tempCli->clientCode == key){
+            return j;//return client position
+        }
+        j = tempCli->pointer;
+        i++;
+    }
+    return -1;//client not found
 }
 
 void insertClient(Client *cli, FILE *fileName){
-    int filePos, controlVar = 0,j,i, mappedPos, temp; 
-    filePos = hashFunction(cli->clientCode, HASH_SIZE);
-    mappedPos = filePos;
-    findClient(cli->clientCode, fileName, &filePos, &controlVar);
-    Client * tempCli = (Client*) malloc(sizeof(Client));
+    int mappedPos, freePos;
+    Client *tempCli = (Client *) malloc(sizeof(Client));
 
-    if(controlVar != 1){//key not found
-        if(filePos != -1){
-            j = filePos;
+    mappedPos = hashFunction(cli->clientCode, HASH_SIZE);
+    cli->status = 1;
+    
+
+    if(findClient(fileName,cli->clientCode) != -1){
+        printf("Dumb user! Client already exists!!!\n");
+    }else{
+        fseek(fileName, mappedPos*clientSize(), SEEK_SET);
+        readClient(tempCli, fileName);
+
+        if(tempCli->status == 0){//Position is available
+            fseek(fileName, mappedPos*clientSize(), SEEK_SET);
+            fwrite(&cli->clientCode,sizeof(int),1,fileName);
+            fwrite(cli->name,sizeof(char),sizeof(cli->name), fileName);
+            fwrite(&cli->status, sizeof(int),1,fileName);
         }else{
-            i=1;
-            j = mappedPos;
-            while(i <= HASH_SIZE){
-                fseek(fileName, j * clientSize() , SEEK_SET);
+            int i,j=mappedPos;
+
+            while(i < HASH_SIZE){
+                fseek(fileName, j*clientSize(), SEEK_SET);
                 readClient(tempCli, fileName);
 
-                if(tempCli->status == 1){//if position is occupied
-                    j = (j+1) % HASH_SIZE;
-                    i++;
-                }else{
-                    i = HASH_SIZE + 2;
+                if(tempCli->status == 0 || tempCli->pointer == -1){
+                    break;
                 }
+                j = tempCli->pointer;
+                i++;
             }
 
-            if(i == (HASH_SIZE + 1)){
+            if(tempCli->status == 0){
+                fseek(fileName, j*clientSize(), SEEK_SET);
+                fwrite(&cli->clientCode,sizeof(int),1,fileName);
+                fwrite(cli->name,sizeof(char),sizeof(cli->name), fileName);
+                fwrite(&cli->status, sizeof(int),1,fileName);
+            }else if(tempCli->pointer == -1){
+                freePos = findFreePosition(fileName, j);
+                fseek(fileName, freePos*clientSize(), SEEK_SET);
+                fwrite(&cli->clientCode,sizeof(int),1,fileName);
+                fwrite(cli->name,sizeof(char),sizeof(cli->name), fileName);
+                fwrite(&cli->status, sizeof(int),1,fileName);
+
+                //setting pointer of the last position of the chain. Now its gonna point to the recent added position
+                fseek(fileName, j*clientSize()+clientSize()-sizeof(int), SEEK_SET);
+                fwrite(&freePos, sizeof(int), 1, fileName);
+
+            }else{
                 printf("Overflow!!!\n");
                 exit(0);
             }
-
-            //temp = T[h(x)].pointer
-            fseek(fileName, mappedPos * clientSize(), SEEK_SET);
-            readClient(tempCli, fileName);
-            temp = tempCli->pointer;
-
-            //T[h(x)].pointer = j
-            tempCli->pointer = j;
-            writeClient(tempCli, fileName, mappedPos, clientSize());
-
-            //T[j].pointer = temp
-            fseek(fileName, j * clientSize(), SEEK_SET);
-            readClient(tempCli, fileName);
-            tempCli->pointer = temp;
-            writeClient(tempCli, fileName, j, clientSize());
-
         }
-
-        //T[j].key = clientCode
-        //T[j].status = occupied
-        cli->status = 1;
-        fseek(fileName, j*clientSize(),SEEK_SET);
-        fwrite(&cli->clientCode, sizeof(int), 1, fileName);
-        fwrite(cli->name, sizeof(char), sizeof(cli->name), fileName);
-        fwrite(&cli->status, sizeof(int), 1, fileName);
-
-    }else{
-        printf("Not allowed: key already exists!\n");
     }
 
+    
 }
 
+void removeClient(FILE *fileName, int key){
+    int mappedPos,i=0,pos,j;
+    Client * tempCli = (Client*) malloc(sizeof(Client));
+
+    // mappedPos = hashFunction(key, HASH_SIZE);
+
+    
+    pos = findClient(fileName, key);
+
+    fseek(fileName, pos*clientSize(), SEEK_SET);
+    readClient(tempCli, fileName);
+
+    if(tempCli->clientCode == key){
+        int nextInChain = tempCli->pointer;
+        j = pos;
+
+        while(i < HASH_SIZE){
+            fseek(fileName, j*clientSize(), SEEK_SET);
+            readClient(tempCli, fileName);
+
+            if(tempCli->pointer == pos){
+                fseek(fileName, j*clientSize()+clientSize()-sizeof(int), SEEK_SET);
+                fwrite(&nextInChain, sizeof(int), 1, fileName);
+                //i = 0;
+            }//else{
+                j = (j+1) % HASH_SIZE;
+                i++;
+            //}
+        }
+        int t = -1;
+        tempCli->status = 0;
+        fseek(fileName, pos*clientSize()+clientSize()-sizeof(int)-sizeof(int), SEEK_SET);
+        fwrite(&tempCli->status, sizeof(int),1,fileName);
+        // fwrite(&t, sizeof(int), 1, fileName);
+    }else{
+        printf("\nDumb user! Client does not exist!!!\n");
+    }
+
+    
+}
+
+
+
 void updateClient(int key, char *name, FILE *fileName){
-    int mappedPos = hashFunction(key, HASH_SIZE);
-    int controlVar = 0;
+    int pos;
 
-    findClient(key, fileName, &mappedPos, &controlVar);
+    pos = findClient(fileName,key);
 
-    if(controlVar == 2){
+    if(pos == -1){
         printf("Dumb user! this client does not exist!!\n");
     }else{
-        if(mappedPos != -1){
-            fseek(fileName, (mappedPos * clientSize()) + sizeof(int), SEEK_SET);
-            fwrite(name, sizeof(char), sizeof(name), fileName);
-        }
+        fseek(fileName, (pos * clientSize()) + sizeof(int), SEEK_SET);
+        fwrite(name, sizeof(char), sizeof(name), fileName);
     }
 }
 
@@ -162,30 +211,6 @@ void createHash(int size, FILE *hashfile){
     fclose(hashfile);
 }
 
-
-
-// int checkPosition(FILE * fileName, int hashPos){
-//     fseek(fileName, hashPos * sizeof(int), SEEK_SET);
-//     int readItem;
-//     fread(&readItem, sizeof(int), 1, fileName);
-
-//     return readItem;
-// }
-
-// void insertPointer(FILE *hashFile, int pointer, int bucket){
-//     fseek(hashFile, bucket, SEEK_SET);
-//     fwrite(&pointer, sizeof(int), 1, hashFile);
-// }
-
-// void printHash(FILE * hashFile){
-//     int pointer, i = 0;
-//     rewind(hashFile);
-//     while(fread(&pointer, sizeof(int), 1, hashFile) > 0){
-//         printf("\n-----------------\n");
-//         printf("Bucket %d: pointer: %d\n",i, pointer);
-//         i++;
-//     }
-// }
 
 void printClients(FILE *clientsFile){
     Client *c = (Client *) malloc(sizeof(Client));
